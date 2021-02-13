@@ -17,6 +17,9 @@ preprocess = transforms.Compose([
 
 #GLOBAL VARIABLES 
 
+# device handle
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
 # model construction / images
 style_layers = [0, 5, 10, 19] #indices of the style layers in model.features 
 content_layers = [28] #indices of the content layers in model.features
@@ -24,17 +27,22 @@ content_layers = [28] #indices of the content layers in model.features
 content_image = preprocess(Image.open("download.jpeg"))
 style_image = preprocess(Image.open("ref2.jpg"))
 
-content_image_batch = content_image.unsqueeze(0)
-style_image_batch = style_image.unsqueeze(0) 
+content_image_batch = content_image.unsqueeze(0).to(device)
+style_image_batch = style_image.unsqueeze(0).to(device)
 
 model = torch.hub.load('pytorch/vision:v0.6.0', 'vgg19', pretrained=True)
 model.eval()
+model.to(device)
 
 
-# optimi
+# optimization
 
+iters = 2000
+style_weights = [0.2,0.2,0.2,0.2]
+alpha = 0.01 # content 
+beta = 10 #style 
 
-#________________  
+#END GLOBAL VARIABLES
 
 def gram_matrix(input_):
     a,b,c,d = input_.size()
@@ -53,9 +61,9 @@ def style_loss(input_, reference_g):
     input : torch.Tensor with all the activations in the current layer
     eference_g : torch.Tensor
     """ 
+    a,b,c,d = input_.size()
     g = gram_matrix(input_)
-    return mse_loss(g, reference_g)
-
+    return 0.25*(1/((b*c*d)**2))*torch.sum(torch.square(g - reference_g))
 
 class loss_layer(nn.Module):
 
@@ -77,56 +85,55 @@ class loss_layer(nn.Module):
             self.loss = style_loss(x, self.target)
         return x
 
-def get_activations(model, content_im, style_im, style_layers, content_layers):
-
-    """
-    return two dicts containing the layer indices and the corresponding activations at that layer 
-    for the style_layers and content_layers
-    """
-
-    style_activations = []
-    content_activations = []
-    c = content_im
-    s = style_im
-    for i, layer in enumerate(model.children()):
-        c = layer(c)
-        s = layer(s)
-        if (i in style_layers):
-            style_activations.append((i, s.detach()))
-        if (i in content_layers):
-            content_activations.append((i, c.detach()))
-
-    return dict(style_activations), dict(content_activations)
-
-
 def create_network(mod):
     """
     mod : vgg network. Must contain .features attribute
     """
-    loss_layers = [] #list that contains references to the intermediate loss layers
-
-    style_activations, content_activations = get_activations(mod.features, content_image_batch, style_image_batch, style_layers, content_layers)
+    
+    style_losses = [] #list that contains references to the intermediate loss layers
+    content_losses = []
 
     new_model = torch.nn.Sequential()
     stop = max(style_layers + content_layers)
 
+    c = content_image_batch
+    s = style_image_batch
+
     for i, layer in enumerate(mod.features):
+
         if i > stop:
             break
+        
         if isinstance(layer, nn.MaxPool2d):
-            new_model.add_module("%d_AvgPool" % (i), nn.AvgPool2d(kernel_size=2, stride=2, padding=0, ceil_mode=False)) #in the paper it's mentioned that better results are obtained with average pooling
+            b = nn.AvgPool2d(kernel_size=2, stride=2, padding=0, ceil_mode=False)
+            new_model.add_module("%d_MaxPool" % (i), layer) #TODO: change this to average pooling
+            c = b(c)
+            s = b(s)
+
         if isinstance(layer, nn.Conv2d):
             new_model.add_module("%d_Conv2D" % (i), layer)
-            if i in style_activations.keys():
-                b = loss_layer(style_activations[i],style=True)
+            c = layer(c)
+            s = layer(s)
+            if i in style_layers:
+                b = loss_layer(s,style=True)
                 new_model.add_module("%d_style_loss" % (i), b)
-            if i in content_activations.keys():
-                b = loss_layer(content_activations[i])
+                style_losses.append(b)
+            if i in content_layers:
+                b = loss_layer(c)
                 new_model.add_module("%d_content_loss" % (i), b)
+                content_losses.append(b)
+
         if isinstance(layer, nn.ReLU):
             b = nn.ReLU(inplace=False)
+            c = layer(c)
+            s = layer(s)
             new_model.add_module("%d_ReLU" % (i), b)
 
-    return new_model, loss_layers 
+    return new_model, style_losses, content_losses
 
-model, loss_layers = create_network(model)
+new_model, style_losses, content_losses = create_network(model)
+
+
+# run style transfer
+gen = torch.rand_like(style_image_batch,requires_grad=True).to(device)
+optim = torch.optim.Adam(gen, lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
