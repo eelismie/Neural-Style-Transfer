@@ -15,17 +15,18 @@ preprocess = transforms.Compose([
     ]
 )
 
-#GLOBAL VARIABLES 
+#--GLOBAL VARIABLES 
 
 # device handle
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 # model construction / images
+
 style_layers = [0, 5, 10, 19] #indices of the style layers in model.features 
 content_layers = [28] #indices of the content layers in model.features
 
-content_image = preprocess(Image.open("download.jpeg"))
-style_image = preprocess(Image.open("ref2.jpg"))
+content_image = preprocess(Image.open("images/duck.jpg"))
+style_image = preprocess(Image.open("images/starry_night.jpg"))
 
 content_image_batch = content_image.unsqueeze(0).to(device)
 style_image_batch = style_image.unsqueeze(0).to(device)
@@ -34,15 +35,15 @@ model = torch.hub.load('pytorch/vision:v0.6.0', 'vgg19', pretrained=True)
 model.eval()
 model.to(device)
 
-
 # optimization
 
-iters = 2000
+iters = 1000
+lr = 0.02
 style_weights = [0.2,0.2,0.2,0.2]
-alpha = 0.01 # content 
+alpha = 0.1 # content 
 beta = 10 #style 
 
-#END GLOBAL VARIABLES
+#--END GLOBAL VARIABLES
 
 def gram_matrix(input_):
     a,b,c,d = input_.size()
@@ -71,9 +72,9 @@ class loss_layer(nn.Module):
         super(loss_layer, self).__init__()
         self.style = style
         if style:
-            self.target = gram_matrix(target) 
+            self.target = gram_matrix(target.detach()) 
         else: 
-            self.target = target
+            self.target = target.detach()
     
     def forward(self, x):
         """ 
@@ -105,12 +106,14 @@ def create_network(mod):
             break
         
         if isinstance(layer, nn.MaxPool2d):
+            #change all max-pool layers to avg_pool layers
             b = nn.AvgPool2d(kernel_size=2, stride=2, padding=0, ceil_mode=False)
-            new_model.add_module("%d_MaxPool" % (i), layer) #TODO: change this to average pooling
+            new_model.add_module("%d_AvgPool" % (i), b) 
             c = b(c)
             s = b(s)
 
         if isinstance(layer, nn.Conv2d):
+            #keep the conv2d layers as they are
             new_model.add_module("%d_Conv2D" % (i), layer)
             c = layer(c)
             s = layer(s)
@@ -124,6 +127,7 @@ def create_network(mod):
                 content_losses.append(b)
 
         if isinstance(layer, nn.ReLU):
+            #change relu layers to inplace=False
             b = nn.ReLU(inplace=False)
             c = layer(c)
             s = layer(s)
@@ -133,7 +137,18 @@ def create_network(mod):
 
 new_model, style_losses, content_losses = create_network(model)
 
-
-# run style transfer
+#run style transfer
 gen = torch.rand_like(style_image_batch,requires_grad=True).to(device)
-optim = torch.optim.Adam(gen, lr=lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+optim = torch.optim.Adam([gen], lr=lr)
+losses = []
+for iter in range(iters):
+    optim.zero_grad()
+    new_model(gen)
+    total_loss = 0
+    for i, s in enumerate(style_losses):
+        total_loss += style_weights[i]*s.loss
+    for i, c in enumerate(content_losses):
+        total_loss += c.loss
+    losses.append(total_loss.detach().cpu().numpy().item())
+    total_loss.backward()
+    optim.step()
