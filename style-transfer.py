@@ -7,6 +7,8 @@ from torchvision import transforms
 from PIL import Image
 import matplotlib.pyplot as plt
 
+torch.autograd.set_detect_anomaly(True)
+
 preprocess = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -14,6 +16,18 @@ preprocess = transforms.Compose([
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]) 
     ]
 )
+
+class InverseNormalize(object):
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, tensor):
+        for t, m, s in zip(tensor, self.mean, self.std):
+            t.mul_(s).add_(m)
+        return tensor
+
+un = InverseNormalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 
 #--GLOBAL VARIABLES 
 
@@ -25,8 +39,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 style_layers = [0, 5, 10, 19] #indices of the style layers in model.features 
 content_layers = [28] #indices of the content layers in model.features
 
-content_image = preprocess(Image.open("images/duck.jpg"))
-style_image = preprocess(Image.open("images/starry_night.jpg"))
+content_image = preprocess(Image.open("trump.jpg"))
+style_image = preprocess(Image.open("guernica.jpg"))
 
 content_image_batch = content_image.unsqueeze(0).to(device)
 style_image_batch = style_image.unsqueeze(0).to(device)
@@ -40,8 +54,8 @@ model.to(device)
 iters = 1000
 lr = 0.02
 style_weights = [0.2,0.2,0.2,0.2]
-alpha = 0.1 # content 
-beta = 10 #style 
+alpha = 1 # content weight
+beta = 1 #style weight
 
 #--END GLOBAL VARIABLES
 
@@ -146,9 +160,17 @@ for iter in range(iters):
     new_model(gen)
     total_loss = 0
     for i, s in enumerate(style_losses):
-        total_loss += style_weights[i]*s.loss
+        total_loss += style_weights[i]*s.loss*beta
     for i, c in enumerate(content_losses):
-        total_loss += c.loss
+        total_loss += c.loss*alpha
     losses.append(total_loss.detach().cpu().numpy().item())
     total_loss.backward()
     optim.step()
+
+
+#show result 
+un(gen[0].detach())
+plt.imshow(gen[0].permute(1, 2, 0).detach().cpu().numpy())
+
+#uncomment to save result 
+#plt.savefig("result.png")
