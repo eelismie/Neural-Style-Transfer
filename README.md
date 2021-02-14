@@ -1,19 +1,29 @@
 # Neural-Style-Transfer
 Exploration and Implementation of style transfer techniques from the paper "A Neural Algorithm of Artistic Style" (arXiv:1508.06576)
 
-
 ## Aims
 
 The goal of this project is simply to learn the techniques behind neural style transfer, and to create an easy-to-use interface that allows the user to experiment with different configurations. 
 
-## Implementation Details
+## Notes on implementation 
 
-The high level description of the flow of the program is as follows. We have a style reference image and we have a content reference image, which we would like to mix. We define a number of parameters, such as the weight of the style and content losses, the weight of the style losses, and the split between the content ans style layers of the network.
+In the paper, it is mentioned that it is preferable to use the VGG-19 network with average pooling layers instead of max pooling layers. In addition to this, during the optimization we need a way to record the content and style losses at certain layers in the network. The most convenient way to do this was to create a new neural network that copied the convolutional layers of the VGG network, and which adds new loss layers at appropriate locations which track the style and content losses at every forward pass. 
 
-The first step is simply to compute the activations of the style and content images at the conv2d layers of the VGG-19 network. We accomplish this by passing both images in the network and saving the outputs at each layer with a forward hook. We store these values in a way that allows them to be efficiently accessed during training. 
+After the new model was built, I kept a list of these new loss layers so that during an optimisation loop it would be easy to compute the loss with appropriate weightings. 
 
-The computation of the correlations (the gram matrix) can be done in a vectorized way by collapsing the input tensors with tensor.view(a*b, c*d) and doing a matrix multiplication with the transpose.   
+## Results
 
-We initialize the optimization algorithm by generating a random noise image or with a copy of the content image. At each forward pass, we compute the style losses at the style layers and the content losses on the content layers. After the forward pass, the total loss is computed as weighted sum of the content and style losses. 
+Here are some examples of the results. With the following style images:
 
-We can then call .backward on the total loss, which stores gradient information in the initial input image. We then update the image with an optimization algortihm of our choice.
+![Style 1](input-images/guernica.jpg)
+
+![Style 2](input-images/cubic.jpg)
+
+You get the following generated images: 
+
+![Picture of Trump in the style of "Guernica" by Picasso](results/trump-guernica.png)
+
+![Picture of city with cubic style](results/city-cubic.png)
+
+## Todo
+* tidy up interface (maybe select style and input images with command-line args)
