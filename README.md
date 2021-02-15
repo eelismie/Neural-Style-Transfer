@@ -13,17 +13,10 @@ After the new model was built, I kept a list of these new loss layers so that du
 
 ## Results
 
-Here are some examples of the results. With the following style images:
-
-![Style 1](input-images/guernica.jpg)
-
-![Style 2](input-images/cubic.jpg)
-
-You get the following generated images: 
+Below are two results obtained by mixing a picture of donald trump with "Guernica" by Picasso and an image of a church with another cubic painting. 
 
 ![Picture of Trump in the style of "Guernica" by Picasso](results/trump-guernica.png)
 
 ![Picture of city with cubic style](results/city-cubic.png)
 
-## Todo
-* tidy up interface (maybe select style and input images with command-line args)
+Running the experiment on a GPU on google colab takes a few minutes. It turns out that in order to reproduce good results it suffices to set an equal weight to the style and content losses, which is the only modification to the parameters reported in the paper. 
